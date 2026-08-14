@@ -27,3 +27,36 @@ Vanilla static, data.js single source of numbers, HARD/DECENT/SOFT/VENDOR
 tags, file:// + zero-console-errors constraint (gpu-study lineage). Visual
 identity chosen fresh at build time. New public repo dgx-spark-experiments;
 GitHub-connected Vercel project `dgxsparkexperiments`.
+
+## D6 — 2026-08-13 — "Bandwidth trap" is a flag, not a verdict
+Spec §5 proposed a 4-way verdict including KNOW-THE-WALL. Implemented as an
+orthogonal `wall` flag instead, because the bandwidth wall is a property of the
+*workload you choose*, not of the playbook: vLLM/SGLang/TRT-LLM are genuinely
+Spark-native for capacity AND carry a decode trap. Verdict axis is now a clean
+3-way (NATIVE / FINE / SETUP); `wall` + `wallNote` name the trap and its
+mitigation on the card.
+
+## D7 — 2026-08-13 — No invented prerequisites
+Spec §6 assumed flux-finetuning depends on comfy-ui. Checked the README: its
+only prerequisites are "device set up" and "no other GPU processes". Dependency
+dropped. `requires[]` now encodes only prerequisites stated verbatim in a
+playbook: ollama → {cli-coding-agent, open-webui, vibe-coding},
+nemoclaw → nemoclaw-applications, connect-two-sparks → nccl.
+
+## D8 — 2026-08-13 — Path builder budgets on the midpoint
+Budgeting on `timeMin` let "An evening" return a plan whose upper bound was
+11 h 35 m. Now accumulates (timeMin+timeMax)/2 while still displaying the full
+range. "An evening" now yields ~2 h 25 m–3 h 35 m.
+
+## D9 — 2026-08-13 — "Multi-Spark only" overrides the setup filter
+The connection playbooks are graded SETUP, so the setup filter was hiding the
+very content a multi-Spark user asked for. Filter precedence inverted: when
+Multi-Spark is on, everything with `twoSpark` shows regardless of verdict.
+Caught by the DOM harness, not by reading the code.
+
+## D10 — 2026-08-13 — Signature widget is a fit calculator, not per-playbook memory bars
+Per-playbook memory footprints would have been invented numbers. Instead the
+page ships one calculator doing transparent arithmetic (params × bytes; bandwidth
+÷ bytes-per-token) and shows how far real measurements fall below the roofline —
+~69% for dense (Llama 70B FP8: 3.9 ceiling, 2.7 measured), ~38% for MoE
+(Gemma 26B-A4B: 136 ceiling, 52 measured). Both calibration points are cited.

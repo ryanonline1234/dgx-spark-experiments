@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DGX Spark Experiments — a field guide to what's worth running on it</title>
+<meta name="description" content="Every official NVIDIA DGX Spark playbook, graded on one question: does this actually need the box? Real durations, honest performance numbers, and a memory-fit calculator.">
+<meta property="og:title" content="DGX Spark Experiments">
+<meta property="og:description" content="46 official playbooks, graded on whether they actually need 128 GB of unified memory.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b0b0d'/%3E%3Crect x='6' y='13' width='20' height='6' rx='1' fill='%2376b900'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="progress" id="progress" aria-hidden="true"><i></i></div>
+
+<header class="topbar">
+  <a class="brand" href="#top">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-txt">DGX&nbsp;Spark<em>Experiments</em></span>
+  </a>
+  <nav class="topnav" id="topnav" aria-label="Sections"></nav>
+</header>
+
+<main id="top">
+
+  <!-- ============================================================ HERO -->
+  <section class="hero">
+    <div class="hero-grid" aria-hidden="true"></div>
+    <div class="wrap hero-inner">
+      <p class="kicker">Field guide · snapshot <span id="snap-date"></span></p>
+      <h1>Most of what you can run on a DGX&nbsp;Spark<br>
+          <span class="hl">doesn't need a DGX Spark.</span></h1>
+      <p class="lede">
+        NVIDIA publishes <strong id="hero-count"></strong> step-by-step playbooks for this machine. They are
+        genuinely good, and they will not tell you which ones justify the hardware.
+        So every one of them is graded here on a single question: <em>does this need
+        128&nbsp;GB of coherent unified memory, or would a laptop and a consumer GPU
+        do it just as well?</em>
+      </p>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="#experiments">See the graded catalog</a>
+        <a class="btn" href="#path">Build a run list</a>
+      </div>
+      <dl class="hwstrip" id="hwstrip"></dl>
+    </div>
+  </section>
+
+  <!-- ======================================================== §1 LEGEND -->
+  <section class="sec" id="legend">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">01</span> How to read this guide <a class="anchor" href="#legend" aria-label="Link to this section">#</a></h2>
+
+      <div class="cols2">
+        <div>
+          <h3 class="sub">The verdict on each experiment</h3>
+          <ul class="legend" id="legend-verdicts"></ul>
+        </div>
+        <div>
+          <h3 class="sub">Where every number came from</h3>
+          <ul class="legend" id="legend-conf"></ul>
+          <p class="note">
+            Durations, model names and prerequisites were read out of each playbook's own
+            README in a clone of the repository — those are <b class="c-hard">HARD</b>.
+            The verdicts are editorial calls, so they're <b class="c-decent">DECENT</b> at
+            best, and each one cites something harder underneath it.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================ §2 REWARDS/PUNISHES -->
+  <section class="sec alt" id="physics">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">02</span> What the box rewards, and what it punishes <a class="anchor" href="#physics" aria-label="Link to this section">#</a></h2>
+
+      <p class="sec-lede">
+        One number explains almost every surprise people have with this machine.
+        There is <b>128&nbsp;GB</b> of memory — enormous — sitting behind
+        <b>273&nbsp;GB/s</b> of bandwidth — modest. Capacity is the moat.
+        Bandwidth is the wall. Everything below follows from that.
+      </p>
+
+      <div class="anchors" id="anchors"></div>
+
+      <div class="explain">
+        <h3 class="sub">Why prefill looks brilliant and decode feels slow</h3>
+        <p>
+          Reading a prompt is compute-bound: the GPU chews through many tokens at once and the
+          Blackwell tensor cores have plenty of headroom. Generating a reply is memory-bound:
+          for every single token, the machine must stream the model's weights through that
+          273&nbsp;GB/s pipe. A dense 70&nbsp;B model at FP8 is 70&nbsp;GB of weights, so the
+          ceiling is about four tokens per second no matter how fast the maths is.
+        </p>
+        <p>
+          Which gives you two levers, and the catalog is full of both.
+          <b>Sparse activation</b> — mixture-of-experts models only read a fraction of their
+          weights per token, so a 26&nbsp;B model with 4&nbsp;B active behaves like a 4&nbsp;B
+          model on the pipe while thinking more like a 26&nbsp;B one.
+          <b>Fewer bytes per weight</b> — NVFP4 halves what FP8 costs to read.
+          <b>Speculative decoding</b> then amortises the reads across several tokens at once.
+          Stack all three and the wall mostly goes away; ignore all three and you will wonder
+          what you bought.
+        </p>
+      </div>
+
+      <!-- fit calculator -->
+      <div class="calc" id="calc">
+        <div class="calc-head">
+          <h3 class="sub">The 128&nbsp;GB question</h3>
+          <p class="note">
+            Napkin arithmetic, shown so you can check it: weights&nbsp;=&nbsp;parameters&nbsp;×&nbsp;bytes-per-parameter,
+            and the decode ceiling&nbsp;=&nbsp;bandwidth&nbsp;÷&nbsp;bytes-read-per-token. It ignores KV cache,
+            activations and runtime overhead, so treat it as an upper bound — the calibration
+            note underneath shows how far real measurements land below it.
+          </p>
+        </div>
+
+        <div class="calc-controls">
+          <label class="ctl">
+            <span>Preset</span>
+            <select id="calc-preset"></select>
+          </label>
+          <label class="ctl">
+            <span>Total parameters <output id="out-total"></output></span>
+            <input type="range" id="calc-total" min="1" max="405" step="1" value="70">
+          </label>
+          <label class="ctl">
+            <span>Active per token <output id="out-active"></output></span>
+            <input type="range" id="calc-active" min="1" max="405" step="1" value="70">
+          </label>
+          <fieldset class="ctl ctl-radio">
+            <legend>Precision</legend>
+            <div id="calc-prec" class="radios"></div>
+          </fieldset>
+        </div>
+
+        <div class="calc-out">
+          <div class="calc-num">
+            <b id="calc-weights"></b><span>GB of weights</span>
+          </div>
+          <div class="calc-num">
+            <b id="calc-ceiling"></b><span>tok/s decode ceiling</span>
+          </div>
+          <div class="calc-num calc-num-wide">
+            <b id="calc-verdict-t" class="calc-verdict"></b><span id="calc-verdict-s"></span>
+          </div>
+        </div>
+
+        <div class="fitbars" id="fitbars"></div>
+        <p class="calib" id="calib"></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- =================================================== §3 THE EXPERIMENTS -->
+  <section class="sec" id="experiments">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">03</span> The experiments <a class="anchor" href="#experiments" aria-label="Link to this section">#</a></h2>
+      <p class="sec-lede">
+        Every playbook NVIDIA ships for the Spark, graded. Durations are the playbooks' own
+        estimates. Filter it down to what you care about — or
+        <a href="#path">let it build you a run list</a>.
+      </p>
+
+      <div class="filters" id="filters">
+        <div class="filter-row">
+          <span class="filter-label">Verdict</span>
+          <div class="chips" id="f-verdict"></div>
+        </div>
+        <div class="filter-row">
+          <span class="filter-label">Track</span>
+          <div class="chips" id="f-track"></div>
+        </div>
+        <div class="filter-row filter-row-end">
+          <label class="toggle"><input type="checkbox" id="f-setup"> <span>Show setup &amp; plumbing</span></label>
+          <label class="toggle"><input type="checkbox" id="f-two"> <span>Multi-Spark only</span></label>
+          <label class="sortsel">Sort
+            <select id="f-sort">
+              <option value="verdict">by verdict</option>
+              <option value="time">by time, shortest first</option>
+              <option value="timeDesc">by time, longest first</option>
+              <option value="name">alphabetically</option>
+            </select>
+          </label>
+          <button class="btn btn-ghost" id="f-reset" type="button">Reset</button>
+        </div>
+        <p class="count" id="f-count" role="status"></p>
+      </div>
+
+      <div class="cards" id="cards"></div>
+    </div>
+  </section>
+
+  <!-- ======================================================= §4 PATH BUILDER -->
+  <section class="sec alt" id="path">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">04</span> Pick your path <a class="anchor" href="#path" aria-label="Link to this section">#</a></h2>
+      <p class="sec-lede">
+        Choose what you're interested in and how much time you have. This orders the
+        playbooks so prerequisites come first, adds up their stated durations, and
+        stops when your budget runs out.
+      </p>
+
+      <div class="picker">
+        <div class="picker-tracks" id="picker-tracks"></div>
+        <div class="picker-budget">
+          <span class="filter-label">Time budget</span>
+          <div class="chips" id="picker-budget"></div>
+          <label class="toggle"><input type="checkbox" id="picker-two"> <span>I have more than one Spark</span></label>
+        </div>
+      </div>
+
+      <div class="plan" id="plan"></div>
+    </div>
+  </section>
+
+  <!-- ========================================================= §5 2-SPARK -->
+  <section class="sec" id="annex">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">05</span> The dual-Spark annex <a class="anchor" href="#annex" aria-label="Link to this section">#</a></h2>
+      <p class="sec-lede">
+        Two Sparks link over dual QSFP ports at an aggregate 200&nbsp;Gb/s, and NVIDIA states
+        the pair can hold models up to <b>405&nbsp;B parameters at FP4</b>. That is the entire
+        pitch, and it is a capacity pitch: you are buying the ability to <em>hold</em> a bigger
+        model, not to run a given model twice as fast. If you own one Spark, skip this —
+        nothing here improves your single-box life.
+      </p>
+      <div class="cards cards-annex" id="annex-cards"></div>
+    </div>
+  </section>
+
+  <!-- ======================================================== §6 WATCHLIST -->
+  <section class="sec alt" id="watchlist">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">06</span> Watchlist <a class="anchor" href="#watchlist" aria-label="Link to this section">#</a></h2>
+      <p class="sec-lede">
+        Playbooks that are widely recommended but aren't currently in the repository.
+        They're here with the evidence, because a recommendation you can't act on is worse
+        than no recommendation.
+      </p>
+      <div id="watch"></div>
+    </div>
+  </section>
+
+  <!-- ============================================================= §7 CES -->
+  <section class="sec" id="ces">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">07</span> The CES 2026 update, scoped honestly <a class="anchor" href="#ces" aria-label="Link to this section">#</a></h2>
+      <div class="cols2">
+        <div>
+          <p>
+            The headline from January was that the Spark is up to <b>2.5×</b> faster than at
+            launch, with no hardware change. That is true, and it is much narrower than it
+            sounds. The 2.5× is one model in one configuration: <b>Qwen-235B under
+            TensorRT-LLM</b>, moved from FP8 to NVFP4 and paired with EAGLE3 speculative
+            decoding.
+          </p>
+          <p>
+            Under the same update, Qwen3-30B and Stable Diffusion 3.5 Large gained about
+            <b>1.4×</b>. Mixture-of-experts models under llama.cpp averaged <b>35%</b>.
+            Fine-tuning gained least of all. So the honest version is: <em>if you convert
+            your weights to NVFP4 and turn on speculative decoding, some workloads roughly
+            double</em>. Which is a real, free, worthwhile gain — and a different sentence
+            from "the Spark got 2.5× faster".
+          </p>
+          <p class="note">
+            This matters beyond pedantry: the gains are opt-in. They arrive when you run the
+            <a href="#experiments" data-goto="nvfp4-quantization">NVFP4 quantization</a> and
+            <a href="#experiments" data-goto="speculative-decoding">speculative decoding</a>
+            playbooks, not when you update the box.
+          </p>
+        </div>
+        <div>
+          <h3 class="sub">Corrections to claims in circulation</h3>
+          <ul class="corrections" id="corrections"></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================= §8 SOURCES -->
+  <section class="sec alt" id="sources">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">08</span> Sources <a class="anchor" href="#sources" aria-label="Link to this section">#</a></h2>
+      <ol class="sources" id="sources-list"></ol>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p id="foot-snap"></p>
+    <p class="note">
+      Independent guide. Not affiliated with or endorsed by NVIDIA. The playbooks themselves
+      are NVIDIA's, published under Apache-2.0. Playbook contents change — verify against the
+      repository before committing an afternoon to something.
+    </p>
+  </div>
+</footer>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
