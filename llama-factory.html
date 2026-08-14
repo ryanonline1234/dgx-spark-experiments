@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fine-tune your first model — LLaMA Factory on DGX Spark, explained from zero</title>
+<meta name="description" content="A beginner's deep dive into LLaMA Factory on the DGX Spark: what fine-tuning actually is, why LoRA fits on this box, and a walkthrough where you understand every step — no PyTorch background assumed.">
+<meta property="og:title" content="Fine-tune your first model — LLaMA Factory on DGX Spark">
+<meta property="og:description" content="What fine-tuning actually is, why LoRA fits in 128 GB, and a walkthrough you can explain to someone else afterward.">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b0b0d'/%3E%3Crect x='6' y='13' width='20' height='6' rx='1' fill='%2376b900'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="page-lf">
+
+<div class="progress" id="progress" aria-hidden="true"><i></i></div>
+
+<header class="topbar">
+  <a class="brand" href="index.html">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-txt">DGX&nbsp;Spark<em>Experiments</em></span>
+  </a>
+  <nav class="topnav" id="topnav" aria-label="Sections"></nav>
+</header>
+
+<main id="top">
+
+  <!-- ============================================================ HERO -->
+  <section class="hero hero-lf">
+    <div class="hero-grid" aria-hidden="true"></div>
+    <div class="wrap hero-inner">
+      <p class="kicker"><a class="crumb" href="index.html">← the field guide</a> · deep dive · <span class="badge b-NATIVE">Spark-native</span></p>
+      <h1>Fine-tune your first model.<br><span class="hl">Understand every step.</span></h1>
+      <p class="lede">
+        The <strong>LLaMA Factory</strong> playbook is the fastest route from "I want the model
+        to behave differently" to a trained result on your Spark. NVIDIA's version lists seven
+        prerequisites — Python, PyTorch, CUDA, VRAM management. This page takes the opposite
+        bet: you have an AI assistant for the mechanical parts, so what you actually need is
+        the <em>mental model</em> — good enough that you could explain to a friend what happened
+        to the model and why it fit on your desk.
+      </p>
+      <dl class="hwstrip lf-strip" id="lf-strip"></dl>
+    </div>
+  </section>
+
+  <!-- ================================================= §1 THE BIG IDEA -->
+  <section class="sec" id="idea">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">01</span> What fine-tuning actually is <a class="anchor" href="#idea" aria-label="Link to this section">#</a></h2>
+      <div class="cols2">
+        <div>
+          <p>
+            A base model like Qwen3-4B already speaks — it read most of the internet.
+            Fine-tuning doesn't teach it new facts so much as new <b>habits</b>: how to
+            answer, in what tone, in what format, as whom. You show it a few hundred
+            examples of the behavior you want, and an optimizer nudges its weights until
+            producing your kind of answer becomes its path of least resistance.
+          </p>
+          <p>
+            The playbook's stock demo makes this concrete in the most literal way possible:
+            its default dataset is ninety question-answer pairs that teach the model
+            <em>a new name</em>. Train for fourteen minutes, ask "who are you?", and it
+            answers with whatever you wrote. Nothing about the world changed — the model's
+            reflexes did. That's fine-tuning, whole and entire; every serious use (your
+            support tone, your codebase's conventions, your product's voice) is the same
+            move with a better dataset.
+          </p>
+          <p class="note">
+            When fine-tuning is the wrong tool: teaching the model <em>facts that change</em>
+            (prices, docs, inventory). That's retrieval's job — see the RAG playbook in the
+            catalog. Fine-tune for behavior, retrieve for knowledge.
+          </p>
+        </div>
+        <div>
+          <figure class="fig">
+            <svg viewBox="0 0 460 240" role="img" aria-label="Base model plus your examples produces an adapted model: same knowledge, new habits">
+              <rect x="14" y="52" width="150" height="120" rx="4" class="d-box"/>
+              <text x="89" y="86" class="d-t d-mid">BASE MODEL</text>
+              <text x="89" y="108" class="d-s d-mid">read the internet</text>
+              <text x="89" y="126" class="d-s d-mid">4,000,000,000 weights</text>
+              <text x="89" y="150" class="d-s d-mid d-dim">frozen habits</text>
+              <text x="196" y="100" class="d-op d-mid">+</text>
+              <rect x="222" y="66" width="96" height="92" rx="4" class="d-box d-box-g"/>
+              <text x="270" y="96" class="d-t d-mid d-green">YOUR</text>
+              <text x="270" y="112" class="d-t d-mid d-green">EXAMPLES</text>
+              <text x="270" y="136" class="d-s d-mid">~90–1,000</text>
+              <text x="270" y="150" class="d-s d-mid">Q&amp;A pairs</text>
+              <path d="M330 112 h44" class="d-arr"/>
+              <rect x="382" y="52" width="66" height="120" rx="4" class="d-box d-box-g2"/>
+              <text x="415" y="96" class="d-t d-mid">SAME</text>
+              <text x="415" y="112" class="d-t d-mid">MODEL,</text>
+              <text x="415" y="128" class="d-t d-mid d-green">NEW</text>
+              <text x="415" y="144" class="d-t d-mid d-green">HABITS</text>
+              <text x="230" y="212" class="d-s d-mid">an optimizer nudges weights until your kind of answer is the easy one</text>
+            </svg>
+            <figcaption>The whole idea on one line: knowledge stays, reflexes change.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================ §2 LORA PICTURE -->
+  <section class="sec alt" id="lora">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">02</span> LoRA in one picture <a class="anchor" href="#lora" aria-label="Link to this section">#</a></h2>
+      <div class="cols2">
+        <div>
+          <figure class="fig">
+            <svg viewBox="0 0 460 260" role="img" aria-label="A frozen weight matrix with a small trainable overlay: output equals frozen weights plus adapter A times B">
+              <rect x="30" y="40" width="150" height="150" rx="4" class="d-box"/>
+              <text x="105" y="105" class="d-t d-mid">FROZEN</text>
+              <text x="105" y="123" class="d-t d-mid">WEIGHTS</text>
+              <text x="105" y="146" class="d-s d-mid d-dim">100% of the model</text>
+              <text x="105" y="161" class="d-s d-mid d-dim">never touched</text>
+              <text x="105" y="215" class="d-s d-mid">❄ the book</text>
+              <text x="212" y="122" class="d-op d-mid">+</text>
+              <rect x="248" y="40" width="26" height="150" rx="3" class="d-box d-box-g"/>
+              <text x="261" y="120" class="d-t d-mid d-green" transform="rotate(-90 261 120)">A</text>
+              <text x="292" y="122" class="d-op d-mid">×</text>
+              <rect x="312" y="102" width="118" height="26" rx="3" class="d-box d-box-g"/>
+              <text x="371" y="120" class="d-t d-mid d-green">B</text>
+              <text x="340" y="215" class="d-s d-mid d-green">✎ the overlay — ~0.1–1%, the only part that trains</text>
+              <text x="340" y="60" class="d-s d-mid d-dim">two skinny matrices</text>
+            </svg>
+            <figcaption>output = frozen&nbsp;weights&nbsp;+&nbsp;A×B. Training moves only A and B.</figcaption>
+          </figure>
+        </div>
+        <div>
+          <p>
+            <b>LoRA</b> (Low-Rank Adaptation) is the trick that makes fine-tuning cheap.
+            Instead of reprinting the whole book, you freeze it and train a transparent
+            <b>overlay</b>: two skinny matrices whose product gets added to the frozen
+            weights on the fly. The overlay is a fraction of a percent of the model's size,
+            so almost nothing needs gradients or optimizer memory — and your finished
+            product is a small <b>adapter file</b> you can share, stack, or delete without
+            ever touching the base model.
+          </p>
+          <p>
+            <b>QLoRA</b> is the same overlay with one extra move: compress the frozen book
+            to 4-bit first. Slightly blurrier base, dramatically less memory — this is the
+            variant that puts 70B-class models in reach of one desk.
+          </p>
+          <p>
+            <code>lora_rank</code> in the config is the overlay's "thickness" — how many
+            columns those skinny matrices have. The default of 8 is thinner than you'd
+            guess and works remarkably well; that surprising fact is the whole reason the
+            technique exists.
+          </p>
+          <div id="lf-methods"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================== §3 WHY THE BOX -->
+  <section class="sec" id="memory">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">03</span> Why this needs the Spark <a class="anchor" href="#memory" aria-label="Link to this section">#</a></h2>
+      <p class="sec-lede">
+        Running a model needs its weights in memory. <em>Training</em> needs the weights
+        <b>plus</b> a gradient for every trainable weight <b>plus</b> the optimizer's
+        bookkeeping <b>plus</b> working activations. That multiplier is the entire story
+        of what fits — and the reason "fine-tuning" and "128 GB" belong in the same sentence.
+      </p>
+      <div class="memchart" id="memchart"></div>
+      <div id="memnotes"></div>
+    </div>
+  </section>
+
+  <!-- ===================================================== §4 THE STACK -->
+  <section class="sec alt" id="stack">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">04</span> The stack you're standing on <a class="anchor" href="#stack" aria-label="Link to this section">#</a></h2>
+      <p class="sec-lede">
+        The old prerequisite list — Python, PyTorch, CUDA, environment setup — is really a
+        description of this tower. You operate the top floor. Everything below it is either
+        preinstalled on DGX OS or installed by one command, and knowing <em>what each layer
+        does</em> is worth more than knowing how to program any of them.
+      </p>
+      <div class="stacktower" id="stacktower"></div>
+    </div>
+  </section>
+
+  <!-- ==================================================== §5 THE DATASET -->
+  <section class="sec" id="data">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">05</span> Your dataset is the product <a class="anchor" href="#data" aria-label="Link to this section">#</a></h2>
+      <div class="cols2">
+        <div>
+          <p>
+            Everything else on this page is machinery you rent. The dataset is the one part
+            that is genuinely yours, because it <em>is</em> the specification: a list of
+            "when asked this, answer exactly like this." You are writing the model's half
+            of its future conversations.
+          </p>
+          <p id="lf-data-point"></p>
+          <p id="lf-data-rule" class="note"></p>
+          <p class="note" id="lf-data-reg"></p>
+        </div>
+        <div>
+          <div class="codecard">
+            <div class="codecard-h" id="lf-data-file"></div>
+            <pre id="lf-data-sample"></pre>
+          </div>
+          <ul class="fieldlist" id="lf-data-fields"></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================== §6 THE CONFIG -->
+  <section class="sec alt" id="config">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">06</span> The config, annotated <a class="anchor" href="#config" aria-label="Link to this section">#</a></h2>
+      <p class="sec-lede">
+        This is the actual file the playbook trains from — quoted from the LLaMA Factory
+        repository, one honest explanation per line. There is no other code. When people
+        say they "wrote a fine-tune," in this workflow they mean they edited this.
+      </p>
+      <div class="configcard">
+        <div class="codecard-h" id="lf-config-path"></div>
+        <div id="lf-config"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================================================== §7 THE RUN -->
+  <section class="sec" id="run">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">07</span> The run, step by step <a class="anchor" href="#run" aria-label="Link to this section">#</a></h2>
+      <p class="sec-lede">
+        Nine steps, condensed from the playbook's twelve. The commands are the playbook's;
+        the paragraph under each is the part you're actually here for. Copy commands freely —
+        the understanding is the deliverable.
+      </p>
+      <ol class="runlist" id="lf-steps"></ol>
+    </div>
+  </section>
+
+  <!-- ================================================ §8 READING THE LOSS -->
+  <section class="sec alt" id="loss">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">08</span> Reading the only chart training gives you <a class="anchor" href="#loss" aria-label="Link to this section">#</a></h2>
+      <div class="cols2">
+        <div>
+          <p id="lf-loss-what"></p>
+          <ul class="losskey" id="lf-loss-key"></ul>
+        </div>
+        <div>
+          <figure class="fig">
+            <svg viewBox="0 0 460 250" role="img" aria-label="Three loss curves: healthy falls then flattens, overfitting dives toward zero, flat line never drops">
+              <line x1="46" y1="20" x2="46" y2="206" class="d-axis"/>
+              <line x1="46" y1="206" x2="440" y2="206" class="d-axis"/>
+              <text x="30" y="115" class="d-s d-mid" transform="rotate(-90 30 115)">loss</text>
+              <text x="243" y="232" class="d-s d-mid">training steps →</text>
+              <path d="M50 44 C 130 60, 150 130, 230 148 S 380 162, 436 166" class="d-curve d-curve-ok"/>
+              <text x="360" y="150" class="d-s d-green">healthy: falls, then flattens</text>
+              <path d="M50 44 C 120 56, 170 150, 240 184 S 350 202, 436 204" class="d-curve d-curve-bad"/>
+              <text x="300" y="196" class="d-s d-red">overfit: dives to zero</text>
+              <path d="M50 52 C 160 46, 300 54, 436 48" class="d-curve d-curve-dim"/>
+              <text x="352" y="38" class="d-s d-dim">flat: nothing learned</text>
+            </svg>
+            <figcaption>The three shapes worth recognizing. The playbook writes this plot to <code>training_loss.png</code> for every run.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================== §9 WHEN IT BREAKS -->
+  <section class="sec" id="breaks">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">09</span> When it breaks <a class="anchor" href="#breaks" aria-label="Link to this section">#</a></h2>
+      <p class="sec-lede">
+        Five failure modes cover nearly everything a first run hits.
+      </p>
+      <div class="breaklist" id="lf-breaks"></div>
+    </div>
+  </section>
+
+  <!-- ================================================ §10 EXPLAIN IT BACK -->
+  <section class="sec alt" id="recap">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">10</span> The prerequisite list, dissolved <a class="anchor" href="#recap" aria-label="Link to this section">#</a></h2>
+      <p class="sec-lede">
+        The playbook's "what to know before starting," item by item, reduced to the part
+        that actually mattered. If each right-hand sentence feels obvious now, you're done:
+        you can operate this playbook <em>and</em> explain to someone else what it did —
+        which was the goal, since the typing was never going to be your job anyway.
+      </p>
+      <div class="dissolve" id="lf-dissolve"></div>
+      <p class="note lf-next" id="lf-next"></p>
+    </div>
+  </section>
+
+  <!-- ========================================================= §11 SOURCES -->
+  <section class="sec" id="sources">
+    <div class="wrap">
+      <h2 class="sec-h"><span class="sec-n">11</span> Sources <a class="anchor" href="#sources" aria-label="Link to this section">#</a></h2>
+      <ol class="sources" id="lf-sources"></ol>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p id="foot-snap"></p>
+    <p class="note">
+      Part of <a href="index.html">DGX Spark Experiments</a>. Independent guide; not
+      affiliated with or endorsed by NVIDIA. Commands and configs are quoted from their
+      sources — verify against the playbook before a long run.
+    </p>
+  </div>
+</footer>
+
+<script src="lf-data.js"></script>
+<script src="lf.js"></script>
+</body>
+</html>

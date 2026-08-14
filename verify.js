@@ -204,6 +204,65 @@ ok(buildPath([], false).length === 0, "empty track selection must yield an empty
   ok(unlimited.kept.length === steps.length, "unlimited budget must keep every step");
 }
 
+/* ------------------------------------------- /llama-factory deep dive */
+group("llama-factory page");
+const { LF } = require("./lf-data.js");
+const lfHtml = fs.readFileSync(path.join(__dirname, "llama-factory.html"), "utf8");
+const lfJs = fs.readFileSync(path.join(__dirname, "lf.js"), "utf8");
+
+// wiring: every id lf.js queries exists in llama-factory.html
+const lfIds = new Set([...lfHtml.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]));
+[...new Set([...lfJs.matchAll(/\$\("#([a-zA-Z0-9_-]+)"\)/g)].map(m => m[1]))]
+  .forEach(id => ok(lfIds.has(id), "lf.js queries #" + id + " missing from llama-factory.html"));
+ok(lfHtml.includes('src="lf-data.js"') && lfHtml.includes('src="lf.js"'), "lf script tags missing");
+ok(lfHtml.indexOf('src="lf-data.js"') < lfHtml.indexOf('src="lf.js"'), "lf-data.js must load before lf.js");
+ok(lfHtml.includes('href="index.html"'), "deep dive must link back to the guide");
+ok(!/<script[^>]+src="https?:/.test(lfHtml), "external script would break file://");
+
+// css classes lf.js emits exist
+["memrow-fill", "memrow-cap", "stackrow", "cfgrow", "runlist", "disrow", "breakrow", "mmtable", "lk-ok", "lk-bad", "card-dive"]
+  .forEach(c => ok(css.includes("." + c) || fs.readFileSync(path.join(__dirname, "styles.css"), "utf8").includes("." + c),
+    "css class ." + c + " missing"));
+
+// data integrity
+ok(LF.methods.length === 3, "expected 3 methods");
+LF.methods.forEach(m => ok(m.bytesPerParam > 0 && m.formula && m.analogy, "method " + m.id + " incomplete"));
+ok(LF.methods[0].bytesPerParam > LF.methods[1].bytesPerParam &&
+   LF.methods[1].bytesPerParam > LF.methods[2].bytesPerParam,
+   "memory ordering must be full > lora > qlora");
+// memory arithmetic sanity, positive + negative
+const gb = (params, m) => params * m.bytesPerParam;
+ok(gb(4, LF.methods[0]) === 64, "4B full should be 64 GB");
+ok(gb(8, LF.methods[0]) === 128, "8B full should sit exactly at the 128 GB line");
+ok(gb(70, LF.methods[1]) > LF.memCapacity, "70B plain-LoRA must read as over the line");
+ok(gb(70, LF.methods[2]) < LF.memCapacity, "70B QLoRA must fit");
+ok(LF.memSizes.every(s => s > 0 && s <= 405), "bad memSizes");
+// steps/commands: no placeholder text, commands present, ordered sanity
+ok(LF.steps.length === 9, "expected 9 condensed steps, got " + LF.steps.length);
+LF.steps.forEach(s => ok(s.cmd && s.why && s.t, "step incomplete: " + s.t));
+ok(LF.steps[0].cmd.includes("nvcc"), "step 1 should be the version checks");
+ok(LF.steps.findIndex(s => s.cmd.includes("venv")) < LF.steps.findIndex(s => s.cmd.includes("pip3 install torch")),
+   "venv must precede the torch install");
+ok(LF.steps.findIndex(s => s.cmd.includes("llamafactory-cli train")) <
+   LF.steps.findIndex(s => s.cmd.includes("llamafactory-cli chat")), "train must precede chat");
+// config lines quote the real yaml keys
+["model_name_or_path", "finetuning_type: lora", "lora_rank: 8", "per_device_train_batch_size: 1",
+ "gradient_accumulation_steps: 8", "learning_rate: 1.0e-4", "num_train_epochs: 3.0", "bf16: true"]
+  .forEach(k => ok(LF.config.lines.some(l => l.code.includes(k)), "config missing quoted line: " + k));
+LF.config.lines.forEach(l => ok(l.why && l.why.length > 20, "config line lacks a real annotation: " + l.code));
+// dataset sample is the real alpaca shape
+LF.dataset.sample.forEach(s =>
+  ok("instruction" in s && "input" in s && "output" in s, "dataset sample not alpaca-shaped"));
+ok(LF.dataset.fields.length === 3, "dataset field explainer wrong length");
+// dissolve section must answer every original prerequisite
+ok(LF.dissolve.length === 6, "expected 6 dissolved prerequisites, got " + LF.dissolve.length);
+LF.dissolve.forEach(d => ok(d.was && d.now && d.now.length > 30, "dissolve entry too thin: " + d.was));
+// sources valid
+LF.sources.forEach(s => ok(/^https:\/\//.test(s.url) && s.note, "bad LF source " + s.id));
+// index links to the deep dive (data-driven)
+const lfPb = PLAYBOOKS.find(p => p.id === "llama-factory");
+ok(lfPb && lfPb.deepDive && lfPb.deepDive.href === "llama-factory", "catalog card must link the deep dive");
+
 /* ------------------------------------------------------------- report */
 console.log("\n" + (fail ? "FAILED" : "OK") + " — " + pass + " passed, " + fail + " failed");
 process.exit(fail ? 1 : 0);

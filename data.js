@@ -177,6 +177,7 @@ const PLAYBOOKS = [
     models: ["Qwen3"], requires: [],
     blurb: "CLI or WebUI front-end for LoRA, QLoRA and full fine-tuning across a wide model zoo.",
     why: "Fastest path from 'I want to fine-tune something' to a running job, because you can drive it from a web form. The 128 GB is what lets you pick a model from the list without first checking whether it fits.",
+    deepDive: { href: "llama-factory", label: "Beginner deep dive: fine-tune your first model" },
     anchor: "s-repo",
   },
   {

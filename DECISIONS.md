@@ -60,3 +60,19 @@ page ships one calculator doing transparent arithmetic (params × bytes; bandwid
 ÷ bytes-per-token) and shows how far real measurements fall below the roofline —
 ~69% for dense (Llama 70B FP8: 3.9 ceiling, 2.7 measured), ~38% for MoE
 (Gemma 26B-A4B: 136 ceiling, 52 measured). Both calibration points are cited.
+
+## D11 — 2026-08-14 — /llama-factory deep dive: mental model over prerequisites
+Ryan picked LLaMA Factory as his playbook; second page added for a vibe-coding
+audience. Design bet (his framing): the reader has AI for the mechanical parts,
+so the page optimizes for being able to EXPLAIN the run, not perform it — every
+prerequisite from NVIDIA's list is dissolved into its 90-second version (§10)
+instead of assumed. Structure: idea → LoRA picture → memory chart → stack →
+dataset → annotated real config → 9 condensed steps → loss curves → failure
+modes → dissolve. Facts quoted from the playbook README (re-read 2026-08-14;
+now venv-based, updated 2026-02-18 — NOT Docker) and the upstream
+qwen3_lora_sft.yaml + identity.json, fetched verbatim. New files: lf-data.js
+(single source), lf.js, llama-factory.html; styles appended. Memory chart uses
+DERIVED bytes/param rules (16 / 2.1 / 0.7) with formulas shown; verify.js
+asserts the arithmetic including 70B-LoRA-over / 70B-QLoRA-fits. Card on index
+links via data.js `deepDive` field (.html href so file:// keeps working;
+Vercel cleanUrls redirects).

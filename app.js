@@ -335,6 +335,7 @@
       '<p class="card-why">' + esc(p.why) + "</p>" +
       (p.wall && p.wallNote ? '<p class="card-wall">' + esc(p.wallNote) + "</p>" : "") +
       (p.correction ? '<p class="card-corr">' + esc(p.correction) + "</p>" : "") +
+      (p.deepDive ? '<a class="card-dive" href="' + esc(p.deepDive.href) + '.html">' + esc(p.deepDive.label) + " →</a>" : "") +
       models +
       '<div class="card-foot">' + (req || "<span></span>") +
       '<a href="' + esc(pbUrl(p)) + '" target="_blank" rel="noopener noreferrer">playbook ↗</a></div>'
